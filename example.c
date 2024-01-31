@@ -29,7 +29,7 @@ int
 main()
 {
     const int TASK_NUM=30;
-    const int THREAD_NUM=10;
+    const int THREAD_NUM=15;
 	struct thread_pool *pool;
     struct thread_task *tasks[TASK_NUM];
     struct timespec s_ts, e_ts;
@@ -58,7 +58,6 @@ main()
             exit(1);
         }
     }
-    printf("%d\n",thread_pool_thread_count(pool));
     printf("Result: %d\n",*(int *)result);
     clock_gettime(CLOCK_MONOTONIC, &e_ts);
 
