@@ -32,7 +32,7 @@ struct thread_pool {
 
     int max_thread_limit;
     int current_thread_count;
-    int running_thread_count;
+    int busy_thread_count;
 
     pthread_mutex_t *pool_mutex;
     pthread_cond_t *pool_cond;
@@ -56,7 +56,7 @@ thread_pool_new(int max_thread_count, struct thread_pool **pool) {
 
     (*pool)->max_thread_limit = max_thread_count;
     (*pool)->current_thread_count = 0;
-    (*pool)->running_thread_count = 0;
+    (*pool)->busy_thread_count = 0;
     (*pool)->worker_threads = malloc(sizeof(pthread_t) * max_thread_count);
     if ((*pool)->worker_threads == NULL) {
         free(*pool);
@@ -116,7 +116,7 @@ thread_pool_delete(struct thread_pool *pool) {
     pthread_mutex_lock(pool->pool_mutex);
     
     // Check if there are still tasks in the queue
-    if (pool->task_buffer_count > 0 || pool->running_thread_count > 0) {
+    if (pool->task_buffer_count > 0 || pool->busy_thread_count > 0) {
         pthread_mutex_unlock(pool->pool_mutex);
         return TPOOL_ERR_HAS_TASKS;
     }
@@ -151,16 +151,19 @@ worker_thread_function(void *arg) {
     while (1) {
         pthread_mutex_lock(pool->pool_mutex);
 
-        while (pool->task_buffer_count == 0) {
-            if (pool->is_shutting_down) {
-                pthread_mutex_unlock(pool->pool_mutex);
-                return NULL;
-            }
+        while (pool->task_buffer_count == 0 && !pool->is_shutting_down) {
             pthread_cond_wait(pool->pool_cond, pool->pool_mutex);
         }
 
-		pool->running_thread_count++;
-        struct thread_task *task = pool->task_buffer[--pool->task_buffer_count];
+		pool->busy_thread_count++;
+
+        if (pool->is_shutting_down) {
+            pthread_mutex_unlock(pool->pool_mutex);
+            return NULL;
+        }
+
+        pool->task_buffer_count--;
+        struct thread_task *task = pool->task_buffer[pool->task_buffer_count];
 		
         pthread_mutex_unlock(pool->pool_mutex);
 
@@ -182,6 +185,7 @@ worker_thread_function(void *arg) {
         task->work_result = result;
 
         if (task->current_state == TASK_STATE_DETACHED) {
+            task->current_state = TASK_STATE_JOINED;
             pthread_mutex_unlock(task->task_mutex);
             thread_task_delete(task);
         } else {
@@ -191,7 +195,7 @@ worker_thread_function(void *arg) {
         }
         
         pthread_mutex_lock(pool->pool_mutex);
-        pool->running_thread_count--;
+        pool->busy_thread_count--;
         pthread_mutex_unlock(pool->pool_mutex);
     }
 
@@ -219,15 +223,13 @@ thread_pool_push_task(struct thread_pool *pool, struct thread_task *task) {
 	pthread_mutex_unlock(task->task_mutex);
 
     if (pool->current_thread_count < pool->max_thread_limit &&
-		 pool->current_thread_count == pool->running_thread_count) {
+		 pool->current_thread_count <= pool->busy_thread_count + pool->task_buffer_count - 1) {
         pthread_t new_thread;
         pthread_create(&new_thread, NULL, worker_thread_function, pool);
 		pool->worker_threads[pool->current_thread_count++] = new_thread;
     }
 
-    // Signal a worker thread that a new task is available
-    pthread_cond_signal(pool->pool_cond);
-
+    pthread_cond_broadcast(pool->pool_cond);
     pthread_mutex_unlock(pool->pool_mutex);
 
     return 0;

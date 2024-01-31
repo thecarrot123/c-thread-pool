@@ -4,19 +4,6 @@
 
 #define NEED_DETACH
 #define NEED_TIMED_JOIN
-/**
- * Here you should specify which features do you want to implement via macros:
- * NEED_DETACH and NEED_TIMED_JOIN. If you want to enable detach, do:
- *
- *     #define NEED_DETACH
- *
- * To enable timed join do:
- *
- *     #define NEED_TIMED_JOIN
- *
- * It is important to define these macros here, in the header, because it is
- * used by tests.
- */
 
 struct thread_pool;
 struct thread_task;
